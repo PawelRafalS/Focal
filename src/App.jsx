@@ -9,6 +9,7 @@ import TaskList from './components/TaskList'
 import TagsView from './components/TagsView'
 import SaveViewModal from './components/SaveViewModal'
 import ViewEditModal from './components/ViewEditModal'
+import ToastContainer from './components/Toast'
 
 export default function App() {
   const {
@@ -131,6 +132,7 @@ export default function App() {
       {editingView && (
         <ViewEditModal view={editingView} onSave={handleEditView} onClose={() => setEditingView(null)} />
       )}
+      <ToastContainer />
     </div>
   )
 }

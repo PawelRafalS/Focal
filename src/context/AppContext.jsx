@@ -19,6 +19,7 @@ const initialState = {
   error:        null,
   activeSection: 'tasks', // 'tasks' | 'tags'
   taskOrder: [],
+  toasts: [],
 }
 
 // ── Reducer ───────────────────────────────────────────────────────────────────
@@ -80,6 +81,10 @@ function reducer(state, action) {
       return { ...state, taskOrder: action.taskOrder }
     case 'REORDER_VIEWS':
       return { ...state, views: action.views }
+    case 'ADD_TOAST':
+      return { ...state, toasts: [...state.toasts, action.toast] }
+    case 'REMOVE_TOAST':
+      return { ...state, toasts: state.toasts.filter(t => t.id !== action.id) }
     default:
       return state
   }
@@ -188,11 +193,12 @@ export function AppProvider({ children }) {
     dispatch({ type: 'OPTIMISTIC_DELETE', id })
     try {
       await api.deleteTask(id)
+      toast('Task deleted')
     } catch (err) {
       await reloadTasks()
       dispatch({ type: 'SET_ERROR', error: err.message })
     }
-  }, [reloadTasks])
+  }, [reloadTasks, toast])
 
   const archiveTask = useCallback(async (id) => {
     if (!archiveTagId) {
@@ -210,11 +216,12 @@ export function AppProvider({ children }) {
     try {
       await api.updateTask(id, { tagIds: [...currentTagIds, archiveTagId] })
       await reloadTasks()
+      toast('Task archived')
     } catch (err) {
       await reloadTasks() // revert optimistic update with fresh data
       dispatch({ type: 'SET_ERROR', error: err.message })
     }
-  }, [archiveTagId, state.allTasks, reloadTasks])
+  }, [archiveTagId, state.allTasks, reloadTasks, toast])
 
   const updateTask = useCallback(async (id, updates) => {
     try {
@@ -274,12 +281,13 @@ export function AppProvider({ children }) {
       if (state.activeViewId === id && updates.filters) {
         dispatch({ type: 'SET_FILTER', filter: updates.filters, viewId: id })
       }
+      toast('View updated')
       return view
     } catch (err) {
       dispatch({ type: 'SET_ERROR', error: err.message })
       return null
     }
-  }, [state.activeViewId])
+  }, [state.activeViewId, toast])
 
   const removeView = useCallback(async (id) => {
     try {
@@ -287,10 +295,11 @@ export function AppProvider({ children }) {
       dispatch({ type: 'DELETE_VIEW', id })
       // If currently on deleted view, go to All Tasks
       if (state.activeViewId === id) navigate(null)
+      toast('View deleted')
     } catch (err) {
       dispatch({ type: 'SET_ERROR', error: err.message })
     }
-  }, [state.activeViewId, navigate])
+  }, [state.activeViewId, navigate, toast])
 
   const reorderViews = useCallback(async (orderedIds) => {
     // Optimistic update
@@ -339,10 +348,11 @@ export function AppProvider({ children }) {
       await api.deleteTag(id)
       dispatch({ type: 'REMOVE_TAG', id })
       await reloadTasks()
+      toast('Tag deleted')
     } catch (err) {
       dispatch({ type: 'SET_ERROR', error: err.message })
     }
-  }, [reloadTasks, archiveTagId])
+  }, [reloadTasks, archiveTagId, toast])
 
   const navigateToSection = useCallback((section) => {
     dispatch({ type: 'SET_SECTION', section })
@@ -351,6 +361,18 @@ export function AppProvider({ children }) {
   }, [])
 
   const clearError = useCallback(() => dispatch({ type: 'CLEAR_ERROR' }), [])
+
+  // ── Toasts ────────────────────────────────────────────────────────────────
+
+  const toast = useCallback((message) => {
+    const id = crypto.randomUUID()
+    dispatch({ type: 'ADD_TOAST', toast: { id, message } })
+    setTimeout(() => dispatch({ type: 'REMOVE_TOAST', id }), 3200)
+  }, [])
+
+  const dismissToast = useCallback((id) => {
+    dispatch({ type: 'REMOVE_TOAST', id })
+  }, [])
 
   const value = {
     // State
@@ -372,6 +394,8 @@ export function AppProvider({ children }) {
     navigateToSection,
     activeSection: state.activeSection,
     clearError,
+    toasts: state.toasts,
+    dismissToast,
   }
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>

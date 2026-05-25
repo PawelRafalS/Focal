@@ -141,9 +141,10 @@ export async function createView(name, filter) {
 }
 
 export async function updateView(id, updates) {
-  const payload = { updated_at: new Date().toISOString() }
+  const payload = {}
   if (updates.name    !== undefined) payload.name    = updates.name
   if (updates.filters !== undefined) payload.filters = updates.filters
+  // updated_at is set automatically if the column exists; omit to avoid schema errors
 
   const { data, error } = await supabase
     .from('views')
