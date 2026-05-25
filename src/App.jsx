@@ -1,191 +1,136 @@
-import { useState, useEffect } from 'react'
+import { useEffect, useState } from 'react'
+import { CheckSquare, X } from 'lucide-react'
+import { useApp } from './context/AppContext'
+import { isSupabaseConfigured } from './lib/supabase'
+import Sidebar from './components/Sidebar'
+import FilterBar from './components/FilterBar'
 import TaskInput from './components/TaskInput'
 import TaskList from './components/TaskList'
-import { supabase, isSupabaseConfigured } from './lib/supabase'
-
-// Fallback: generate a simple unique id when no backend
-function uid() {
-  return Date.now().toString(36) + Math.random().toString(36).slice(2)
-}
+import TagsView from './components/TagsView'
+import SaveViewModal from './components/SaveViewModal'
+import ViewEditModal from './components/ViewEditModal'
 
 export default function App() {
-  const [tasks, setTasks] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  const {
+    loadAll, addView, editView,
+    activeFilter, activeViewId, activeSection,
+    tags, views, error, clearError,
+  } = useApp()
 
-  // ─── Load tasks on mount ───────────────────────────────────────────────
+  const [showSaveModal, setShowSaveModal] = useState(false)
+  const [editingView,   setEditingView]   = useState(null)
+  const [sidebarOpen,   setSidebarOpen]   = useState(false)
+
+  useEffect(() => { loadAll() }, [loadAll])
+
   useEffect(() => {
-    if (isSupabaseConfigured) {
-      loadFromSupabase()
-    } else {
-      // Fallback: load from localStorage
-      const saved = localStorage.getItem('focal_tasks')
-      setTasks(saved ? JSON.parse(saved) : [])
-      setLoading(false)
-    }
-  }, [])
+    function onPop() { loadAll() }
+    window.addEventListener('popstate', onPop)
+    return () => window.removeEventListener('popstate', onPop)
+  }, [loadAll])
 
-  // Persist to localStorage when not using Supabase
-  useEffect(() => {
-    if (!isSupabaseConfigured) {
-      localStorage.setItem('focal_tasks', JSON.stringify(tasks))
-    }
-  }, [tasks])
-
-  // ─── Supabase helpers ──────────────────────────────────────────────────
-  async function loadFromSupabase() {
-    setLoading(true)
-    const { data, error } = await supabase
-      .from('tasks')
-      .select('*')
-      .order('created_at', { ascending: false })
-
-    if (error) {
-      setError('Could not load tasks. Check your Supabase setup.')
-      console.error(error)
-    } else {
-      setTasks(data)
-    }
-    setLoading(false)
+  async function handleSaveView(name) {
+    await addView(name, activeFilter)
+    setShowSaveModal(false)
   }
 
-  // ─── Add task ──────────────────────────────────────────────────────────
-  async function handleAdd(title) {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase
-        .from('tasks')
-        .insert([{ title, completed: false }])
-        .select()
-        .single()
-
-      if (error) {
-        setError('Could not add task.')
-        console.error(error)
-      } else {
-        setTasks((prev) => [data, ...prev])
-      }
-    } else {
-      const newTask = { id: uid(), title, completed: false, created_at: new Date().toISOString() }
-      setTasks((prev) => [newTask, ...prev])
-    }
+  async function handleEditView(name, filter) {
+    await editView(editingView.id, { name, filters: filter })
+    setEditingView(null)
   }
 
-  // ─── Toggle complete ───────────────────────────────────────────────────
-  async function handleToggle(id) {
-    const task = tasks.find((t) => t.id === id)
-    const updated = { ...task, completed: !task.completed }
-
-    // Optimistic update
-    setTasks((prev) => prev.map((t) => (t.id === id ? updated : t)))
-
-    if (isSupabaseConfigured) {
-      const { error } = await supabase
-        .from('tasks')
-        .update({ completed: updated.completed })
-        .eq('id', id)
-
-      if (error) {
-        // Rollback on error
-        setTasks((prev) => prev.map((t) => (t.id === id ? task : t)))
-        setError('Could not update task.')
-        console.error(error)
-      }
+  function getTitle() {
+    if (activeSection === 'tags') return 'Tags'
+    if (activeFilter?.type === 'ARCHIVE') return 'Archived Tasks'
+    if (activeViewId) {
+      const view = views.find(v => v.id === activeViewId)
+      if (view) return view.name
     }
+    if (activeFilter?.type === 'TAG') {
+      const tag = tags.find(t => t.id === activeFilter.value)
+      return tag ? tag.name : 'Filtered'
+    }
+    if (activeFilter?.type === 'DUE_DATE') {
+      const labels = { today: 'Today', tomorrow: 'Tomorrow',
+        this_week: 'This Week', next_7_days: 'Next 7 Days', overdue: 'Overdue' }
+      return labels[activeFilter.value] ?? 'Filtered'
+    }
+    return 'All Tasks'
   }
 
-  // ─── Delete task ───────────────────────────────────────────────────────
-  async function handleDelete(id) {
-    const previous = tasks
-    setTasks((prev) => prev.filter((t) => t.id !== id)) // optimistic
-
-    if (isSupabaseConfigured) {
-      const { error } = await supabase.from('tasks').delete().eq('id', id)
-
-      if (error) {
-        setTasks(previous) // rollback
-        setError('Could not delete task.')
-        console.error(error)
-      }
-    }
-  }
-
-  // ─── Counts for header ─────────────────────────────────────────────────
-  const pendingCount = tasks.filter((t) => !t.completed).length
+  const inTagsSection   = activeSection === 'tags'
+  const inArchiveView   = activeFilter?.type === 'ARCHIVE'
 
   return (
-    <div className="min-h-screen bg-stone-50 flex flex-col">
-      {/* Header */}
-      <header className="sticky top-0 z-10 bg-stone-50/80 backdrop-blur-sm border-b border-stone-200">
-        <div className="max-w-xl mx-auto px-6 py-4 flex items-baseline justify-between">
-          <div>
-            <h1 className="text-base font-semibold tracking-tight text-stone-900">
-              Focal
-            </h1>
-            <p className="text-xs text-stone-400 mt-0.5">Stay on task.</p>
-          </div>
-          {pendingCount > 0 && (
-            <span className="text-xs font-medium text-violet-600 bg-violet-50 border border-violet-200 px-2 py-0.5 rounded-full">
-              {pendingCount} open
+    <div className="h-screen overflow-hidden bg-gray-50 flex">
+      {/* ── Sidebar ── */}
+      <aside className={`
+        fixed inset-y-0 left-0 z-30 w-56 bg-white border-r border-gray-100
+        flex flex-col px-3 py-6 transition-transform duration-200
+        ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+        lg:translate-x-0 lg:static lg:flex
+      `}>
+        <div className="flex items-center gap-2 px-3 mb-6">
+          <CheckSquare size={20} className="text-violet-600" />
+          <span className="font-bold text-gray-900 tracking-tight">Focal</span>
+        </div>
+        <Sidebar onEditView={setEditingView} />
+      </aside>
+
+      {sidebarOpen && (
+        <div className="fixed inset-0 z-20 bg-black/20 lg:hidden"
+          onClick={() => setSidebarOpen(false)} />
+      )}
+
+      {/* ── Main content ── */}
+      <main className="flex-1 flex flex-col min-w-0 overflow-y-auto">
+        <header className="sticky top-0 z-10 bg-gray-50 border-b border-gray-100 px-6 py-4 flex items-center gap-3">
+          <button onClick={() => setSidebarOpen(v => !v)}
+            className="lg:hidden text-gray-500 hover:text-gray-700" aria-label="Toggle menu">
+            <svg width="20" height="20" fill="none" stroke="currentColor" strokeWidth="2">
+              <path d="M3 6h14M3 12h14M3 18h14" strokeLinecap="round" />
+            </svg>
+          </button>
+          <h1 className="text-lg font-semibold text-gray-900 flex-1">{getTitle()}</h1>
+          {!isSupabaseConfigured && (
+            <span className="text-xs bg-amber-100 text-amber-700 px-2.5 py-1 rounded-full font-medium">
+              Local mode
             </span>
           )}
-        </div>
-      </header>
+        </header>
 
-      {/* Main content */}
-      <main className="flex-1 max-w-xl mx-auto w-full px-6 py-8 flex flex-col gap-6">
-        {/* Error banner */}
         {error && (
-          <div className="bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-3 rounded-xl flex items-center justify-between">
-            <span>{error}</span>
-            <button
-              onClick={() => setError(null)}
-              className="text-red-400 hover:text-red-600 ml-4 font-medium"
-            >
-              ✕
-            </button>
+          <div className="mx-6 mt-4 flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-sm px-4 py-2.5 rounded-xl">
+            <span className="flex-1">{error}</span>
+            <button onClick={clearError} aria-label="Dismiss"><X size={14} /></button>
           </div>
         )}
 
-        {/* Dev mode notice when Supabase not connected */}
-        {!isSupabaseConfigured && (
-          <div className="bg-amber-50 border border-amber-200 text-amber-700 text-xs px-4 py-3 rounded-xl">
-            <span className="font-medium">Local mode</span> — Tasks are saved in your browser.{' '}
-            <a
-              href="https://github.com/your-username/focal#connecting-supabase"
-              className="underline hover:no-underline"
-              target="_blank"
-              rel="noreferrer"
-            >
-              Connect Supabase
-            </a>{' '}
-            to persist across devices.
-          </div>
-        )}
-
-        {/* Task input */}
-        <TaskInput onAdd={handleAdd} disabled={loading} />
-
-        {/* Task list */}
-        <TaskList
-          tasks={tasks}
-          onToggle={handleToggle}
-          onDelete={handleDelete}
-          loading={loading}
-        />
+        <div className="flex-1 px-6 py-6 max-w-2xl w-full mx-auto space-y-4">
+          {inTagsSection ? (
+            <TagsView />
+          ) : (
+            <>
+              {!inArchiveView && (
+                <>
+                  <TaskInput />
+                  <FilterBar onSaveView={() => setShowSaveModal(true)} />
+                </>
+              )}
+              <div className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+                <TaskList />
+              </div>
+            </>
+          )}
+        </div>
       </main>
 
-      {/* Footer */}
-      <footer className="text-center py-6 text-xs text-stone-400">
-        Built with React + Supabase ·{' '}
-        <a
-          href="https://github.com/your-username/focal"
-          className="hover:text-stone-600 transition-colors"
-          target="_blank"
-          rel="noreferrer"
-        >
-          GitHub
-        </a>
-      </footer>
+      {showSaveModal && (
+        <SaveViewModal onSave={handleSaveView} onClose={() => setShowSaveModal(false)} />
+      )}
+      {editingView && (
+        <ViewEditModal view={editingView} onSave={handleEditView} onClose={() => setEditingView(null)} />
+      )}
     </div>
   )
 }
