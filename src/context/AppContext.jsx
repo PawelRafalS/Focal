@@ -167,6 +167,19 @@ export function AppProvider({ children }) {
     window.history.pushState({}, '', path)
   }, [])
 
+  // ── Toasts ────────────────────────────────────────────────────────────────
+  // Declared early so all actions below can safely reference it in their deps
+
+  const toast = useCallback((message) => {
+    const id = crypto.randomUUID()
+    dispatch({ type: 'ADD_TOAST', toast: { id, message } })
+    setTimeout(() => dispatch({ type: 'REMOVE_TOAST', id }), 3200)
+  }, [])
+
+  const dismissToast = useCallback((id) => {
+    dispatch({ type: 'REMOVE_TOAST', id })
+  }, [])
+
   // ── Task actions ──────────────────────────────────────────────────────────
 
   const addTask = useCallback(async (title, tagIds, dueDate) => {
@@ -362,17 +375,6 @@ export function AppProvider({ children }) {
 
   const clearError = useCallback(() => dispatch({ type: 'CLEAR_ERROR' }), [])
 
-  // ── Toasts ────────────────────────────────────────────────────────────────
-
-  const toast = useCallback((message) => {
-    const id = crypto.randomUUID()
-    dispatch({ type: 'ADD_TOAST', toast: { id, message } })
-    setTimeout(() => dispatch({ type: 'REMOVE_TOAST', id }), 3200)
-  }, [])
-
-  const dismissToast = useCallback((id) => {
-    dispatch({ type: 'REMOVE_TOAST', id })
-  }, [])
 
   const value = {
     // State
